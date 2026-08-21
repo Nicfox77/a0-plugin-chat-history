@@ -1,0 +1,2 @@
+psycopg[binary,pool]>=3.2,<4
+pg0-embedded>=0.15,<0.16

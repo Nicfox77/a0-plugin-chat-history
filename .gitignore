@@ -1,0 +1,41 @@
+# Agent Zero writes per-install settings here.
+/config.json
+
+# Local credentials and environment overrides.
+.env
+.env.*
+!.env.example
+secrets.env
+*.pem
+*.key
+
+# Python and test artifacts.
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Runtime state, databases, logs, and downloaded models.
+/state/
+/.cache/
+/models/
+/venv/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.log
+*.onnx
+*.safetensors
+*.gguf
+
+# Build and editor artifacts.
+/build/
+/dist/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,181 @@
+<html>
+<head>
+  <title>Chat History</title>
+</head>
+<body>
+<div x-data>
+  <template x-if="config">
+    <div>
+
+      <div class="section-title">Chat History</div>
+      <div class="section-description">
+        Every conversation (main chat, subagents, background jobs) is
+        replicated into an embedded Postgres database and searchable via
+        chat_list / chat_inspect / chat_search. JSON chat files stay the
+        source of truth.
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Replica enabled</div>
+          <div class="field-description">Mirror conversations into the database.</div>
+        </div>
+        <div class="field-control">
+          <label class="toggle">
+            <input type="checkbox" x-model="config.enabled">
+            <span class="toggler"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Storage mode</div>
+          <div class="field-description">
+            <strong>replica</strong> (default): JSON files are the source of
+            truth, the DB is an additive copy. <strong>authoritative</strong>:
+            the DB is the system of record — exact-format snapshots are
+            captured after every turn, and at startup missing or stale chat
+            files are rebuilt from the database before Agent Zero loads them.
+            The live UI (streaming, colors) is untouched either way.
+          </div>
+        </div>
+        <div class="field-control">
+          <select x-model="config.storage_mode">
+            <option value="replica">replica</option>
+            <option value="authoritative">authoritative</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Semantic search embeddings</div>
+          <div class="field-description">
+            Embed stored messages with the embedding model configured in
+            model settings (enables chat_search mode "semantic").
+          </div>
+        </div>
+        <div class="field-control">
+          <label class="toggle">
+            <input type="checkbox" x-model="config.embed_enabled">
+            <span class="toggler"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="section-title">Continuous Mode</div>
+      <div class="section-description">
+        One infinite main chat: when the primary chat exceeds a token
+        budget it is compacted automatically and the summary is archived to
+        a rolling deck that is injected into every turn. Off = stock
+        auto-compaction, unchanged. When enabled, messages sent to other
+        main-agent chats are routed to this main chat automatically.
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Enable Continuous Mode</div>
+          <div class="field-description">Rolling compaction + summary deck for the primary chat.</div>
+        </div>
+        <div class="field-control">
+          <label class="toggle">
+            <input type="checkbox" x-model="config.continuous_mode">
+            <span class="toggler"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Evict per compaction</div>
+          <div class="field-description">
+            Fraction of the model context summarized and removed when Agent
+            Zero's preset history budget is reached.
+          </div>
+        </div>
+        <div class="field-control">
+          <input type="number" min="0.05" max="0.8" step="0.05"
+                 x-model.number="config.evict_ratio">
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Minimum tokens</div>
+          <div class="field-description">Never compact below this many tokens.</div>
+        </div>
+        <div class="field-control">
+          <input type="number" min="500" max="100000" step="500"
+                 x-model.number="config.min_tokens">
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Deck render budget (tokens)</div>
+          <div class="field-description">
+            Maximum tokens of deck summaries injected per turn; older blocks
+            collapse to a count note. All summaries stay stored — raise this
+            (e.g. after moving to a larger-context model) to render more of
+            them.
+          </div>
+        </div>
+        <div class="field-control">
+          <input type="number" min="300" max="12000" step="100"
+                 x-model.number="config.deck_max_tokens">
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Primary chat name</div>
+          <div class="field-description">
+            Canonical name the primary chat is renamed to whenever it drifts
+            (e.g. after the utility-model auto-rename runs). Leave blank to
+            fall back to <code>Main</code>.
+          </div>
+        </div>
+        <div class="field-control">
+          <input type="text" x-model="config.main_chat_name">
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Lock primary chat name</div>
+          <div class="field-description">
+            After every monologue, rename the primary chat to the value above.
+            Effective only when Continuous Mode is on.
+          </div>
+        </div>
+        <div class="field-control">
+          <label class="toggle">
+            <input type="checkbox" x-model="config.lock_main_chat_name">
+            <span class="toggler"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">
+          <div class="field-title">Pin primary chat</div>
+          <div class="field-description">
+            Sort the primary chat to the top of <code>chat_list</code> and
+            expose it via <code>/api/plugins/chat_history/pinned</code> for the
+            web UI to pin. Effective only when Continuous Mode is on.
+          </div>
+        </div>
+        <div class="field-control">
+          <label class="toggle">
+            <input type="checkbox" x-model="config.pin_main_chat">
+            <span class="toggler"></span>
+          </label>
+        </div>
+      </div>
+
+    </div>
+  </template>
+</div>
+</body>
+</html>

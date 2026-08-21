@@ -1,0 +1,34 @@
+# Replica enabled (in replica mode; the DB is additive)
+enabled: true
+# Storage mode: "replica" (JSON files authoritative, DB additive) or
+# "authoritative" (DB is the system of record; exact-format snapshots are
+# captured after every turn and missing/stale files are rebuilt from the
+# DB at startup before the stock chat loader runs)
+storage_mode: replica
+# Embed message texts with the framework-configured embedding model
+embed_enabled: true
+# Continuous Mode: one infinite main chat with rolling compaction into a
+# summary deck. Off = stock auto-compaction, untouched.
+continuous_mode: false
+# Evict this fraction of ctx_length at each rolling compaction. The trigger is
+# the active Agent Zero preset's existing ctx_length * ctx_history budget.
+evict_ratio: 0.3
+# Never compact below this many tokens
+min_tokens: 2000
+# Inject the deck into primary-chat prompts
+deck_injection: true
+# Token budget for the rendered deck (rendering bound — storage keeps ALL
+# summaries forever; trim manually via the compact endpoint if needed)
+deck_max_tokens: 2000
+# Canonical name for the primary chat (Continuous Mode only). The name-lock
+# sweep renames the resolved primary to this on every monologue end so the
+# utility-model auto-rename cannot rename it away.
+main_chat_name: Main
+# Lock the primary chat's name to main_chat_name (sweeps new + existing;
+# enforces on the next monologue). Off = names stay whatever the utility
+# model / user picks.
+lock_main_chat_name: true
+# Pin the primary chat to the top of chat_list and expose it via the
+# /api/plugins/chat_history/pinned endpoint (browser-facing). Off = no
+# pin ordering, no endpoint surfacing.
+pin_main_chat: true
