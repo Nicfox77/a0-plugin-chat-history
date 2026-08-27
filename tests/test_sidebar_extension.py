@@ -5,14 +5,13 @@ from pathlib import Path
 
 EXTENSION = (
     Path(__file__).resolve().parents[1]
-    / "extensions/webui/initFw_end/main-pin-v2.js"
+    / "extensions/webui/initFw_end/main-pin-v3.js"
 )
 
 
 def test_legacy_module_path_is_absent_to_force_cache_invalidation():
-    legacy = EXTENSION.with_name("main-pin.js")
-
-    assert not legacy.exists()
+    for name in ("main-pin.js", "main-pin-v2.js"):
+        assert not EXTENSION.with_name(name).exists()
 
 
 def _source() -> str:
@@ -27,11 +26,25 @@ def test_sidebar_filters_non_primary_top_level_chats_but_keeps_children():
     assert 'return pinned.concat(rest);' in source
 
 
-def test_new_chat_is_guarded_by_selecting_the_primary():
+def test_new_chat_selects_primary_or_bootstraps_the_first_main_chat():
     source = _source()
 
-    assert 'chatsStoreRef.newChat = async () => selectMain();' in source
+    assert 'if (mainContextId) return selectMain();' in source
+    assert 'const createdContextId = await stockNewChat(...args);' in source
+    assert 'await refreshPinned(10);' in source
+    assert 'return mainContextId || createdContextId;' in source
     assert 'await chatsStoreRef.selectChat(mainContextId);' in source
+
+
+def test_empty_store_still_installs_the_create_guard_before_pin_resolution():
+    source = _source()
+
+    resolve_stores = source.index(
+        'await Promise.all([resolveSidebarStore(), resolveChatsStore()]);'
+    )
+    install_guard = source.index('installSingleChatCreateGuard();', resolve_stores)
+    refresh_pin = source.index('await refreshPinned();', install_guard)
+    assert resolve_stores < install_guard < refresh_pin
 
 
 def test_hidden_legacy_selection_is_repaired():

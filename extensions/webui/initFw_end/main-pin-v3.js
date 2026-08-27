@@ -1,8 +1,8 @@
 import { fetchApi } from "/js/api.js";
 
-// The v2 module path intentionally invalidates browsers that cached the old
-// dashboard-redirect behavior under main-pin.js.
-const PINNED_EXTENSION_NAME = "chat-history-main-pin-v2";
+// The v3 module path invalidates browsers that cached the pre-bootstrap v2
+// behavior, which installed no New Chat guard when the store was empty.
+const PINNED_EXTENSION_NAME = "chat-history-main-pin-v3";
 const PINNED_BADGE_CLASS = "chat-primary-pin";
 const PINNED_BADGE_ICON = "keep";
 const PINNED_LI_CLASS = "chat-pinned-main";
@@ -18,6 +18,8 @@ let chatsStoreRef = null;
 let observerInstalled = false;
 let installed = false;
 let selectionRepairPending = false;
+let createGuardInstalled = false;
+let stockNewChat = null;
 
 async function fetchPinned() {
   try {
@@ -61,6 +63,28 @@ function registerSortExtension() {
   sidebarStoreRef.registerRowListExtension("chat", PINNED_EXTENSION_NAME, {
     sort: pinnedSort,
   });
+}
+
+function applyPinned(pinned) {
+  if (!pinned) return false;
+  mainContextId = pinned.contextId;
+  mainContextName = pinned.name || "";
+  registerSortExtension();
+  installObserver();
+  onListMutated();
+  updateNewChatButton();
+  return true;
+}
+
+async function refreshPinned(attempts = 1) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const pinned = await fetchPinned();
+    if (applyPinned(pinned)) return pinned;
+    if (attempt + 1 < attempts) {
+      await new Promise((resolve) => globalThis.setTimeout(resolve, 100));
+    }
+  }
+  return null;
 }
 
 function findPinnedRow(listEl) {
@@ -162,15 +186,36 @@ async function selectMain() {
   return mainContextId;
 }
 
-function installSingleChatCreateGuard() {
-  if (!chatsStoreRef || typeof chatsStoreRef.newChat !== "function") return;
-  chatsStoreRef.newChat = async () => selectMain();
-
+function updateNewChatButton() {
   const button = document.getElementById("newChat");
-  if (button) {
-    button.setAttribute("aria-label", "Open Main chat");
-    button.setAttribute("title", "Open Main chat");
-  }
+  if (!button) return;
+  const label = mainContextId ? "Open Main chat" : "Start Main chat";
+  button.setAttribute("aria-label", label);
+  button.setAttribute("title", label);
+}
+
+function installSingleChatCreateGuard() {
+  if (
+    createGuardInstalled
+    || !chatsStoreRef
+    || typeof chatsStoreRef.newChat !== "function"
+  ) return;
+
+  stockNewChat = chatsStoreRef.newChat.bind(chatsStoreRef);
+  chatsStoreRef.newChat = async (...args) => {
+    if (mainContextId) return selectMain();
+
+    const createdContextId = await stockNewChat(...args);
+    if (!createdContextId) return null;
+
+    // /chat_create has already registered the live AgentContext. Resolving the
+    // pin now claims that first root chat as Main; the short retry covers the
+    // WebSocket snapshot arriving just after the HTTP response.
+    await refreshPinned(10);
+    return mainContextId || createdContextId;
+  };
+  createGuardInstalled = true;
+  updateNewChatButton();
 }
 
 function repairHiddenSelection() {
@@ -191,14 +236,10 @@ export default async function initChatHistoryMainPin() {
   if (installed) return;
   installed = true;
 
-  const pinned = await fetchPinned();
-  if (!pinned) return;
-  mainContextId = pinned.contextId;
-  mainContextName = pinned.name || "";
-
   await Promise.all([resolveSidebarStore(), resolveChatsStore()]);
   registerSortExtension();
   installSingleChatCreateGuard();
   installObserver();
+  await refreshPinned();
   repairHiddenSelection();
 }

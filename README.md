@@ -55,8 +55,11 @@ backed by an embedded Postgres (pg0) — no extra containers or services.
   **before** the stock chat loader runs. The live UI (streaming, colors,
   transcript view) always reads files and live state — nothing about the
   stock experience changes; files simply become a cache the DB can always
-  rebuild. Chats deleted through the UI are detected and dropped from the
-  DB after a grace period.
+  rebuild. After loading, an ID-based reconciliation restores any real user
+  history rows missing from the WebUI log (while excluding tool results,
+  summaries, and framework notifications), then persists the repaired
+  snapshot. Chats deleted through the UI are detected and dropped from the DB
+  after a grace period.
 
 ## Status & operator endpoints (loopback)
 

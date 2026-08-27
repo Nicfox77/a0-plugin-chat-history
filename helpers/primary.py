@@ -90,13 +90,10 @@ def _is_root_user_context(context) -> bool:
     output_data = getattr(context, "output_data", {}) or {}
     if data.get("parent_context_id") or output_data.get("parent_context_id"):
         return False
-    try:
-        from helpers import projects
-
-        if projects.get_context_project_name(context):
-            return False
-    except Exception:
-        pass
+    # NOTE: project binding deliberately does NOT disqualify the primary.
+    # A main chat activated into a project (e.g. via the projects tool) is
+    # still the main chat; rejecting it orphaned the primary and spawned a
+    # duplicate empty "Main" after restarts (incident 2026-08-23).
     return True
 
 
@@ -111,8 +108,8 @@ def _is_persisted_root_user(context_id: str) -> bool:
     output_data = payload.get("output_data") or {}
     if data.get("parent_context_id") or output_data.get("parent_context_id"):
         return False
-    if data.get("project") or output_data.get("project"):
-        return False
+    # Project binding does not disqualify the persisted primary (see
+    # _is_root_user_context).
     return True
 
 
@@ -179,6 +176,37 @@ def resolve_primary_context():
 
         context = AgentContext.get(context_id)
         return context if _is_root_user_context(context) else None
+    except Exception:
+        return None
+
+
+def hydrate_primary_context():
+    """Materialize the persisted primary into the live registry if needed.
+
+    After a service restart the stock chat loader may not have registered
+    the primary yet (deferred load, idle unload, partial boot). Transport
+    handlers call this before falling back to spawning a fresh context, so
+    a durable pin always wins over a new empty chat.
+    """
+    try:
+        from agent import AgentContext
+    except Exception:
+        return None
+    context_id = resolve_primary_context_id()
+    if not context_id:
+        return None
+    live = AgentContext.get(context_id)
+    if live is not None:
+        return live if _is_root_user_context(live) else None
+    if not _valid_context_id(context_id):
+        return None
+    try:
+        from helpers import persist_chat
+
+        data = json.loads(_chat_path(context_id).read_text(encoding="utf-8"))
+        context = persist_chat._deserialize_context(data)
+        persist_chat.mark_chat_saved(context)
+        return context
     except Exception:
         return None
 

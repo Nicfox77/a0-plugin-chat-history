@@ -49,7 +49,20 @@ class OrganizeHistoryWait(Extension):
                 compressed = await compress_history(self.agent)
 
             after_tokens = self.agent.history.get_tokens()
-            if not compressed or after_tokens >= before_tokens:
+            if not compressed:
+                # A Continuous Mode task can become unnecessary between its
+                # threshold check and completion (for example after another
+                # compactor wins the lock). A below-threshold no-op is not a
+                # stalled compression and should not alarm the operator.
+                still_required = self.agent.history.is_over_limit()
+                if _continuous_primary(self.agent):
+                    from usr.plugins.chat_history.helpers.rolling import should_compact
+
+                    still_required = should_compact(self.agent)
+                if still_required:
+                    self._log_stalled(before_tokens, after_tokens)
+                break
+            if after_tokens >= before_tokens:
                 self._log_stalled(before_tokens, after_tokens)
                 break
             if passes >= MAX_SYNC_COMPRESSION_PASSES:

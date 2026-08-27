@@ -25,6 +25,7 @@ materialization.
 from __future__ import annotations
 
 import json
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,13 @@ from usr.plugins.chat_history.helpers import db
 from usr.plugins.chat_history.helpers import settings
 
 GRACE = timedelta(minutes=15)
+
+# Per-process transcript mtime cache: capture runs after every monologue and
+# on job ticks, but only the newest file changed — skip unchanged files so
+# per-turn cost stays O(new messages) instead of O(all transcripts). First
+# capture after boot pays one full pass.
+_FILE_MTIME_CACHE: dict[str, dict[str, float]] = {}
+_FILE_CACHE_LOCK = threading.Lock()
 
 
 def capture_context(context) -> bool:
@@ -47,13 +55,31 @@ def capture_context(context) -> bool:
 
         blob_text = export_json_chat(context)
         blob = json.loads(blob_text)
+        if not isinstance(blob, dict) or not blob.get("agents"):
+            # A shell or mid-construction context must never replace the
+            # authoritative snapshot — that would materialize as an empty
+            # chat over a good file at the next boot.
+            PrintStyle.warning(
+                f"chat_history: refusing to snapshot {context_id}: serialization produced no agents"
+            )
+            return False
         conn = db.get_connection()
 
         def count_messages(node: Any) -> int:
             if isinstance(node, dict):
                 if node.get("_cls") == "Message":
                     return 1
-                return sum(count_messages(v) for v in node.values())
+                total = 0
+                for key, value in node.items():
+                    # The stock serializer stores agent history as a JSON
+                    # string inside the blob; parse it so messages count.
+                    if key == "history" and isinstance(value, str):
+                        try:
+                            value = json.loads(value)
+                        except ValueError:
+                            pass
+                    total += count_messages(value)
+                return total
             if isinstance(node, list):
                 return sum(count_messages(v) for v in node)
             return 0
@@ -79,11 +105,21 @@ def capture_context(context) -> bool:
                 ),
             )
 
-        # Capture per-message transcript files (source of the UI transcript)
+        # Capture per-message transcript files (source of the UI transcript).
+        # Delta sync: stat every file, re-upsert only those whose mtime moved
+        # since the last capture so the loop stays cheap as transcripts grow.
         folder = Path(get_chat_folder_path(context_id))
         messages_dir = folder / "messages"
         if messages_dir.is_dir():
+            with _FILE_CACHE_LOCK:
+                known = _FILE_MTIME_CACHE.setdefault(context_id, {})
             for file in messages_dir.glob("*.txt"):
+                try:
+                    mtime = file.stat().st_mtime
+                except OSError:
+                    continue
+                if known.get(file.name) == mtime:
+                    continue
                 try:
                     content = file.read_text(encoding="utf-8", errors="replace")
                 except OSError:
@@ -98,6 +134,7 @@ def capture_context(context) -> bool:
                         """,
                         (context_id, file.name, content),
                     )
+                known[file.name] = mtime
         return True
     except Exception as exc:  # noqa: BLE001
         PrintStyle.warning(f"chat_history: snapshot capture failed: {exc}")
@@ -131,6 +168,14 @@ def restore_stale_files() -> dict[str, int]:
     chats = _chats_dir()
     for context_id, blob_text, saved_at in rows:
         try:
+            # Never materialize a shell snapshot over a file: a blob without
+            # agents means the capture was corrupted (or the context was
+            # mid-construction); the existing file is the better truth.
+            if not isinstance(blob_text, dict) or not blob_text.get("agents"):
+                PrintStyle.warning(
+                    f"chat_history: skipping shell snapshot for {context_id}"
+                )
+                continue
             folder = chats / context_id
             chat_file = folder / "chat.json"
             blob = json.dumps(blob_text, ensure_ascii=False)

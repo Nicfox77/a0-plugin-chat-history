@@ -82,7 +82,8 @@ def _resolve_primary():
             candidate is not None
             and getattr(candidate, "type", None) == AgentContextType.USER
             and not _is_parallel_worker(candidate)
-            and not _is_project_bound(candidate)
+            # Project binding does not disqualify the pinned primary; see
+            # chat_history.helpers.primary._is_root_user_context.
         ):
             return candidate
 

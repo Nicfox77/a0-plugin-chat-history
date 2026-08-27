@@ -27,13 +27,19 @@ class SummaryDeckInjection(Extension):
                 return
 
             # Once per monologue: deck context is turn context, not loop context
-            if str(loop_data.extras_persistent.get("summary_deck") or "").strip():
+            if loop_data.extras_persistent.get("summary_deck"):
                 return
 
-            from usr.plugins.chat_history.helpers.deck import render_deck
+            from usr.plugins.chat_history.helpers.deck import (
+                fetch_entries,
+                render_entry_lines,
+            )
 
-            rendered = render_deck("main")
-            if rendered.strip():
-                loop_data.extras_persistent["summary_deck"] = rendered.strip()
+            entries = render_entry_lines(fetch_entries("main"))
+            if entries:
+                # List of per-entry summaries: synthetic_context renders each
+                # as its own system message after the system prompt, before
+                # the chat history.
+                loop_data.extras_persistent["summary_deck"] = entries
         except Exception as exc:
             PrintStyle.warning(f"chat_history: deck injection skipped: {exc}")

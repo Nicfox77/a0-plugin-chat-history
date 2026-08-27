@@ -173,48 +173,63 @@ def entry_count(deck_id: str = DECK_ID) -> int:
         return cur.fetchone()[0]
 
 
-def render_entries(entries: list[dict[str, Any]], budget: int | None = None) -> str:
-    """Render entries oldest→newest within a token budget (pure function).
+def render_entry_lines(
+    entries: list[dict[str, Any]],
+    budget: int | None = None,
+    overhead_tokens: int = 0,
+) -> list[str]:
+    """Render entries oldest→newest as one string per entry (pure function).
 
     Newest entries render in full; when the budget is exceeded, remaining
     older entries collapse into a one-line count note (their content still
     lives in the table and long-term memory — raise deck_max_tokens after
     switching to a larger-context model to render more of them).
+    ``overhead_tokens`` reserves budget for surrounding framing (the deck
+    header in the joined rendering).
     """
     from helpers import tokens
 
     entries = [e for e in entries if str(e.get("summary") or "").strip()]
     if not entries:
-        return ""
+        return []
     if budget is None:
         budget = settings.int_setting("deck_max_tokens", "CH_DECK_MAX_TOKENS", 2000)
     budget = max(300, budget)
 
-    header = "Conversation summary deck (rolling compaction of this chat, oldest to newest):"
-    lines = [header]
-    used = tokens.approximate_tokens(header)
     kept: list[str] = []
     omitted = 0
-
+    used = int(overhead_tokens)
     for entry in reversed(entries):  # newest first for budget decisions
         summary = " ".join(str(entry["summary"]).split())
         created = str(entry.get("created_at") or "")[:10]
-        line = f"- [{created}] {summary}"
-        cost = tokens.approximate_tokens(line)
+        line = f"[{created}] {summary}"
+        cost = tokens.approximate_tokens(f"- {line}")
         if used + cost > budget and kept:
             omitted += 1
             continue
         kept.append(line)
         used += cost
 
+    lines = list(reversed(kept))  # back to chronological order
     if omitted:
-        kept.append(
-            f"- (... {omitted} earlier summary blocks omitted; their content is in long-term memory)"
+        lines.insert(
+            0,
+            f"(... {omitted} earlier summary blocks omitted; their content is in long-term memory)",
         )
+    return lines
 
-    if not kept:
+
+def render_entries(entries: list[dict[str, Any]], budget: int | None = None) -> str:
+    """Render entries oldest→newest within a token budget (pure function)."""
+    from helpers import tokens
+
+    header = "Conversation summary deck (rolling compaction of this chat, oldest to newest):"
+    lines = render_entry_lines(
+        entries, budget, overhead_tokens=tokens.approximate_tokens(header)
+    )
+    if not lines:
         return ""
-    return "\n".join([header, *reversed(kept)])
+    return "\n".join([header, *[f"- {line}" for line in lines]])
 
 
 def render_deck(deck_id: str = DECK_ID) -> str:

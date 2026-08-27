@@ -6,6 +6,16 @@ regardless of the token threshold. Returns deck stats.
 
 GET same path — deck stats only, no compaction.
 
+Action payloads (POST body):
+    (action omitted) — run a single rolling cycle on the resolved primary
+        chat.
+    action="trim", keep=N — manual deck maintenance; keeps the newest N
+        entries (default 20), returns the deletion count and fresh stats.
+    action="full" (or "full-archive") — archive the ENTIRE native history
+        into the summary deck in boundary-aligned chunks; chat history is
+        cleared, continuity is retained via the deck (injected every turn
+        regardless of history size).
+
 Loopback-only. 409s when Continuous Mode is off.
 """
 
@@ -65,6 +75,8 @@ class ChatHistoryCompact(ApiHandler):
                 "stats": stats(""),
             }
 
+        action = str(input.get("action") or "").strip().lower()
+
         from usr.plugins.chat_history.helpers.primary import resolve_primary_context_id
 
         context_id = str(input.get("context_id") or "").strip() or resolve_primary_context_id()
@@ -81,6 +93,29 @@ class ChatHistoryCompact(ApiHandler):
             return {"ok": False, "message": f"Context '{context_id}' not found (live contexts only)."}
         if context.is_running():
             return {"ok": False, "message": "Context is running; retry when idle."}
+
+        if action == "full-archive" or action == "full":
+            from usr.plugins.chat_history.helpers.rolling import run_full_compaction
+
+            try:
+                import asyncio
+
+                archived = await asyncio.wait_for(
+                    run_full_compaction(context), timeout=1800
+                )
+            except Exception as exc:
+                PrintStyle.error(f"chat_history: full archive failed: {exc}")
+                return {"ok": False, "message": str(exc)}
+            return {
+                "ok": bool(archived),
+                "archived": archived,
+                "message": (
+                    f"Archived {archived} segment(s); history cleared."
+                    if archived
+                    else "Nothing archived (empty summary or no history)."
+                ),
+                "stats": stats(context_id),
+            }
 
         from usr.plugins.chat_history.helpers.rolling import run_rolling_compaction
 

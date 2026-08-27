@@ -55,6 +55,18 @@ class OrganizeHistory(Extension):
         if task and not task.is_ready():
             return
 
+        if _continuous_primary(self.agent):
+            from usr.plugins.chat_history.helpers.rolling import should_compact
+
+            # Continuous Mode owns a much larger rolling-history threshold than
+            # stock History.is_over_limit(). Do not create a background no-op
+            # after every tool turn: the matching wait hook would reasonably
+            # assume that any pending task represents required compression.
+            if task:
+                self.agent.set_data(DATA_NAME_TASK, None)
+            if not should_compact(self.agent):
+                return
+
         task = DeferredTask(thread_name=THREAD_BACKGROUND)
         task.start_task(compress_history, self.agent)
         self.agent.set_data(DATA_NAME_TASK, task)
